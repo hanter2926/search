@@ -11,7 +11,7 @@ Status values: `NOT STARTED`, `IN PROGRESS`, `IMPLEMENTED`, `TESTED`, `VISUALLY 
 
 ## Messaging
 
-- [TESTED] Authentication and sessions
+- [TESTED] Passwordless OTP authentication and expiring sessions
 - [TESTED] Direct conversations and message requests
 - [TESTED] Send/receive messages and Socket.IO delivery
 - [TESTED] Replies, forwarding, reactions, editing, deletion, star, pin
@@ -24,7 +24,7 @@ Status values: `NOT STARTED`, `IN PROGRESS`, `IMPLEMENTED`, `TESTED`, `VISUALLY 
 - [NOT STARTED] Groups and group permissions
 - [NOT STARTED] Status/stories
 - [NOT STARTED] Media and document sharing
-- [BLOCKED BY EXTERNAL REQUIREMENT] Email verification and recovery delivery
+- [IMPLEMENTED] Email OTP verification and account activation; real SMTP delivery remains externally blocked
 - [BLOCKED BY EXTERNAL REQUIREMENT] Push notifications
 - [BLOCKED BY EXTERNAL REQUIREMENT] WebRTC audio/video calling
 - [BLOCKED BY EXTERNAL REQUIREMENT] Audited Signal-compatible E2EE key service
@@ -36,7 +36,7 @@ Status values: `NOT STARTED`, `IN PROGRESS`, `IMPLEMENTED`, `TESTED`, `VISUALLY 
 - [NOT STARTED] Authentication recovery pages
 - [NOT STARTED] Settings, devices, privacy, security, notifications
 - [NOT STARTED] Admin panel and moderation
-- [IN PROGRESS] Android shared authentication and chat workflow
+- [TESTED] Android OTP authentication bundle and shared chat workflow; physical-device verification pending
 
 ## Infrastructure
 

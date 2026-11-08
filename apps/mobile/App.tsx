@@ -16,9 +16,8 @@ async function api<T>(path: string, options: RequestInit = {}, token?: string) {
 export default function App() {
   const [token, setToken] = useState<string>();
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [registering, setRegistering] = useState(false);
+  const [otp, setOtp] = useState("");
+  const [verificationPending, setVerificationPending] = useState(false);
   const [conversations, setConversations] = useState<ConversationDetail[]>([]);
   const [active, setActive] = useState<ConversationDetail>();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -32,8 +31,14 @@ export default function App() {
 
   async function authenticate() {
     try {
-      const result = await api<AuthResponse>(registering ? "/api/auth/register" : "/api/auth/login", { method: "POST", body: JSON.stringify({ email, password, displayName }) });
-      await AsyncStorage.setItem("search-token", result.token); setToken(result.token); setError("");
+      if (!verificationPending) {
+        await api("/api/auth/request-otp", { method: "POST", body: JSON.stringify({ email }) });
+        setVerificationPending(true);
+        setError("");
+        return;
+      }
+      const result = await api<AuthResponse>("/api/auth/verify-email", { method: "POST", body: JSON.stringify({ email, otp }) });
+      await AsyncStorage.setItem("search-token", result.token); setToken(result.token); setError(""); setVerificationPending(false);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to authenticate"); }
   }
   async function send() {
@@ -48,9 +53,9 @@ export default function App() {
     catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to react"); }
   }
 
-  if (!token) return <SafeAreaView style={styles.container}><View style={styles.mark}><Text style={styles.markText}>S</Text></View><Text style={styles.title}>SEARCH</Text><Text style={styles.subtitle}>Conversations, in focus.</Text>{registering && <TextInput style={styles.input} placeholder="Display name" placeholderTextColor="#78859b" value={displayName} onChangeText={setDisplayName} />}{<TextInput style={styles.input} placeholder="Email" placeholderTextColor="#78859b" keyboardType="email-address" autoCapitalize="none" value={email} onChangeText={setEmail} />}{<TextInput style={styles.input} placeholder="Password (8+ characters)" placeholderTextColor="#78859b" secureTextEntry value={password} onChangeText={setPassword} />}<Pressable style={styles.primary} onPress={() => void authenticate()}><Text style={styles.primaryText}>{registering ? "Create account" : "Sign in"}</Text></Pressable><Pressable onPress={() => setRegistering(!registering)}><Text style={styles.link}>{registering ? "Sign in instead" : "Create an account"}</Text></Pressable>{error && <Text style={styles.error}>{error}</Text>}<StatusBar style="light" /></SafeAreaView>;
+  if (!token) return <SafeAreaView style={styles.container}><View style={styles.mark}><Text style={styles.markText}>S</Text></View><Text style={styles.title}>SEARCH</Text><Text style={styles.subtitle}>{verificationPending ? "Enter the code sent to your email." : "Conversations, in focus."}</Text><TextInput style={styles.input} placeholder="Email" placeholderTextColor="#78859b" keyboardType="email-address" autoCapitalize="none" value={email} onChangeText={setEmail} editable={!verificationPending} />{verificationPending && <TextInput style={styles.input} placeholder="6-digit code" placeholderTextColor="#78859b" keyboardType="number-pad" maxLength={6} value={otp} onChangeText={setOtp} />}<Pressable style={styles.primary} onPress={() => void authenticate()}><Text style={styles.primaryText}>{verificationPending ? "Verify code" : "Continue"}</Text></Pressable>{verificationPending && <Pressable onPress={() => { setVerificationPending(false); setOtp(""); }}><Text style={styles.link}>Use a different email</Text></Pressable>}{error && <Text style={styles.error}>{error}</Text>}<StatusBar style="light" /></SafeAreaView>;
   if (active) return <SafeAreaView style={styles.container}><View style={styles.header}><Pressable onPress={() => setActive(undefined)}><Text style={styles.link}>‹ Chats</Text></Pressable><Text style={styles.headerTitle}>{active.title}</Text></View>{replyTo && <View style={styles.reply}><Text style={styles.muted}>Replying to: {replyTo.body}</Text><Pressable onPress={() => setReplyTo(undefined)}><Text style={styles.link}>×</Text></Pressable></View>}<FlatList style={styles.messages} data={messages} keyExtractor={(item) => item.id} renderItem={({ item }) => <View style={[styles.bubble, item.sender.id === active.participants[0]?.id ? styles.incoming : styles.outgoing]}><Pressable onLongPress={() => setReplyTo(item)}><Text style={styles.bubbleText}>{item.deletedAt ? "Message deleted" : item.body}</Text></Pressable><View style={styles.messageTools}><Pressable onPress={() => void react(item)}><Text style={styles.muted}>❤️ {item.reactions["❤️"]?.length ?? ""}</Text></Pressable><Text style={styles.muted}>{item.readBy.length > 1 ? "✓✓" : "✓"}</Text></View></View>} /><View style={styles.composer}><TextInput style={styles.messageInput} placeholder="Message..." placeholderTextColor="#78859b" value={draft} onChangeText={setDraft} /><Pressable style={styles.send} onPress={() => void send()}><Text style={styles.primaryText}>↑</Text></Pressable></View></SafeAreaView>;
-  return <SafeAreaView style={styles.container}><View style={styles.header}><Text style={styles.title}>SEARCH</Text><Pressable onPress={() => { void AsyncStorage.removeItem("search-token"); setToken(undefined); }}><Text style={styles.link}>Sign out</Text></Pressable></View><Text style={styles.section}>Conversations</Text>{conversations.length === 0 && <Text style={styles.muted}>No conversations yet. Start one from the web app.</Text>}<FlatList data={conversations} keyExtractor={(item) => item.id} renderItem={({ item }) => <Pressable style={styles.row} onPress={() => setActive(item)}><View style={styles.avatar}><Text style={styles.primaryText}>{item.title.slice(0, 2).toUpperCase()}</Text></View><View><Text style={styles.rowTitle}>{item.title}</Text><Text style={styles.muted}>{item.lastMessage?.body ?? "Start a conversation"}</Text></View></Pressable>} />{error && <Text style={styles.error}>{error}</Text>}<StatusBar style="light" /></SafeAreaView>;
+  return <SafeAreaView style={styles.container}><View style={styles.header}><Text style={styles.title}>SEARCH</Text><Pressable onPress={() => { if (token) void api("/api/auth/logout", { method: "POST" }, token); void AsyncStorage.removeItem("search-token"); setToken(undefined); }}><Text style={styles.link}>Sign out</Text></Pressable></View><Text style={styles.section}>Conversations</Text>{conversations.length === 0 && <Text style={styles.muted}>No conversations yet. Start one from the web app.</Text>}<FlatList data={conversations} keyExtractor={(item) => item.id} renderItem={({ item }) => <Pressable style={styles.row} onPress={() => setActive(item)}><View style={styles.avatar}><Text style={styles.primaryText}>{item.title.slice(0, 2).toUpperCase()}</Text></View><View><Text style={styles.rowTitle}>{item.title}</Text><Text style={styles.muted}>{item.lastMessage?.body ?? "Start a conversation"}</Text></View></Pressable>} />{error && <Text style={styles.error}>{error}</Text>}<StatusBar style="light" /></SafeAreaView>;
 }
 
 const styles = StyleSheet.create({

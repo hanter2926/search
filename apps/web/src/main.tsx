@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { io, type Socket } from "socket.io-client";
 import type { AuthResponse, AuthUser, ConversationDetail, Message, UserSummary } from "@search/shared";
 import "./styles.css";
+import "./theme.css";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
 const storedToken = localStorage.getItem("search-token");
@@ -18,11 +19,10 @@ async function request<T>(path: string, options: RequestInit = {}, token = store
   return payload;
 }
 
-function AuthScreen({ onAuthenticated }: { onAuthenticated: (result: AuthResponse) => void }) {
-  const [registering, setRegistering] = useState(false);
+function OtpAuthScreen({ onAuthenticated }: { onAuthenticated: (result: AuthResponse) => void }) {
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [displayName, setDisplayName] = useState("");
+  const [verificationEmail, setVerificationEmail] = useState<string>();
+  const [otp, setOtp] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -30,15 +30,84 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (result: AuthRespons
     event.preventDefault();
     setBusy(true); setError("");
     try {
-      const result = await request<AuthResponse>(registering ? "/api/auth/register" : "/api/auth/login", {
-        method: "POST", body: JSON.stringify({ email, password, displayName })
+      if (!verificationEmail) {
+        const result = await request<{ email: string }>("/api/auth/request-otp", {
+          method: "POST", body: JSON.stringify({ email })
+        }, undefined);
+        setVerificationEmail(result.email);
+      } else {
+        const result = await request<AuthResponse>("/api/auth/verify-email", {
+          method: "POST", body: JSON.stringify({ email: verificationEmail, otp })
+        }, undefined);
+        onAuthenticated(result);
+      }
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to continue"); }
+    finally { setBusy(false); }
+  }
+
+  async function resend() {
+    if (!verificationEmail) return;
+    setBusy(true); setError("");
+    try {
+      await request("/api/auth/request-otp", { method: "POST", body: JSON.stringify({ email: verificationEmail }) }, undefined);
+      setError("A new code was sent.");
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to resend code"); }
+    finally { setBusy(false); }
+  }
+
+  return <main className="auth-page auth-verify"><div className="auth-card"><div className="brand"><span className="brand-mark">S</span><span>SEARCH</span></div><p className="eyebrow">{verificationEmail ? "Secure sign in" : "Welcome to SEARCH"}</p><h1>{verificationEmail ? "Check your inbox." : "Continue with email"}</h1><p className="auth-subtitle">{verificationEmail ? `Enter the six-digit code sent to ${verificationEmail}.` : "No password required. We will send you a one-time code."}</p><form onSubmit={submit}>{!verificationEmail ? <input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Email address" aria-label="Email address" /> : <input required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={otp} onChange={(event) => setOtp(event.target.value)} placeholder="000000" aria-label="Email verification code" />}{error && <p className="form-error">{error}</p>}<button className="primary-button" disabled={busy}>{busy ? "Please wait..." : verificationEmail ? "Verify code" : "Continue"}</button></form>{verificationEmail && <><button className="link-button" onClick={() => void resend()} disabled={busy}>Resend code</button><button className="link-button" onClick={() => { setVerificationEmail(undefined); setOtp(""); setError(""); }}>Use a different email</button></>}</div></main>;
+}
+
+function AuthScreen({ onAuthenticated }: { onAuthenticated: (result: AuthResponse) => void }) {
+  const registering = false;
+  const password = "";
+  const displayName = "";
+  const setRegistering = (_value: boolean) => undefined;
+  const setPassword = (_value: string) => undefined;
+  const setDisplayName = (_value: string) => undefined;
+  const [verificationEmail, setVerificationEmail] = useState<string>();
+  const [otp, setOtp] = useState("");
+  const [email, setEmail] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true); setError("");
+    try {
+      const result = await request<{ verificationRequired: boolean; email: string }>("/api/auth/request-otp", {
+        method: "POST", body: JSON.stringify({ email })
       }, undefined);
-      onAuthenticated(result);
+      setVerificationEmail(result.email);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to authenticate"); }
     finally { setBusy(false); }
   }
 
-  return <main className="auth-page"><nav className="public-nav"><div className="brand"><span className="brand-mark">S</span><span>SEARCH</span></div><div className="public-links"><a href="#about">About</a><a href="#features">Features</a><a href="#help">Help</a></div></nav><section className="landing-hero"><div className="landing-copy"><p className="eyebrow">A calmer way to connect</p><h1>Conversations,<br /><em>in focus.</em></h1><p>SEARCH brings your people, ideas, and everyday moments together in one thoughtful space.</p><div className="hero-actions"><button className="primary-button" onClick={() => document.querySelector<HTMLInputElement>("[aria-label='Email address']")?.focus()}>Get started</button><button className="secondary-button" onClick={() => setRegistering(true)}>Create an account</button></div></div><div className="hero-card"><div className="hero-card-top"><span className="brand-mark">S</span><span>Private by design</span><i /></div><div className="hero-message incoming-card"><span className="mini-avatar coral">AM</span><div><strong>Ava Morgan</strong><p>The launch notes look great.</p></div><time>09:42</time></div><div className="hero-message outgoing-card"><div><strong>You</strong><p>Let&apos;s polish the final details?</p></div><time>09:43</time></div><div className="hero-card-footer"><span><i /> Everyone&apos;s here</span><span>✓✓</span></div></div></section><section className="public-section" id="about"><p className="eyebrow">Made for real conversations</p><h2>Less noise. More signal.</h2><p>SEARCH is an original communication platform designed around clarity, control, and the people you care about.</p></section><section className="public-section feature-section" id="features"><div><p className="eyebrow">Everything in one place</p><h2>Thoughtful tools for staying close.</h2></div><div className="feature-grid"><article><strong>01</strong><h3>Private spaces</h3><p>Message people directly with clear request and contact controls.</p></article><article><strong>02</strong><h3>In the moment</h3><p>Real-time delivery, reactions, replies, receipts, and presence.</p></article><article><strong>03</strong><h3>Find your focus</h3><p>Search conversations and keep important messages close.</p></article></div></section><section className="public-section" id="help"><p className="eyebrow">Need a hand?</p><h2>We&apos;re here to help.</h2><p>Start with an account, then use the in-app conversation controls to connect securely.</p></section><div className="auth-card"><div className="brand"><span className="brand-mark">S</span><span>SEARCH</span></div><h1>{registering ? "Create your account" : "Welcome back"}</h1><p className="auth-subtitle">Private conversations, in focus.</p><form onSubmit={submit}>{registering && <input required value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Display name" /> }<input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Email address" /><input required minLength={8} type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password (8+ characters)" />{error && <p className="form-error">{error}</p>}<button className="primary-button" disabled={busy}>{busy ? "Please wait..." : registering ? "Create account" : "Sign in"}</button></form><button className="link-button" onClick={() => { setRegistering(!registering); setError(""); }}>{registering ? "Already have an account? Sign in" : "New to SEARCH? Create an account"}</button></div></main>;
+  async function verify(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true); setError("");
+    try {
+      const result = await request<AuthResponse>("/api/auth/verify-email", {
+        method: "POST", body: JSON.stringify({ email: verificationEmail, otp })
+      }, undefined);
+      onAuthenticated(result);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to verify email"); }
+    finally { setBusy(false); }
+  }
+
+  async function resendVerification() {
+    if (!verificationEmail) return;
+    setBusy(true); setError("");
+    try {
+      await request("/api/auth/request-otp", { method: "POST", body: JSON.stringify({ email: verificationEmail }) }, undefined);
+      setError("A fresh code was sent. Check your inbox.");
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to resend code"); }
+    finally { setBusy(false); }
+  }
+
+  if (verificationEmail) return <main className="auth-page auth-verify"><div className="auth-card"><div className="brand"><span className="brand-mark">S</span><span>SEARCH</span></div><p className="eyebrow">One more step</p><h1>Check your inbox.</h1><p className="auth-subtitle">We sent a six-digit code to <strong>{verificationEmail}</strong>. It expires in five minutes.</p><form onSubmit={verify}><input required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={otp} onChange={(event) => setOtp(event.target.value)} placeholder="000000" aria-label="Email verification code" />{error && <p className="form-error">{error}</p>}<button className="primary-button" disabled={busy}>{busy ? "Verifying..." : "Verify email"}</button></form><button className="link-button" onClick={() => void resendVerification()} disabled={busy}>Resend verification code</button><button className="link-button" onClick={() => { setVerificationEmail(undefined); setOtp(""); }}>Use a different email</button></div></main>;
+
+  return <main className="auth-page"><nav className="public-nav"><div className="brand"><span className="brand-mark">S</span><span>SEARCH</span></div><div className="public-links"><a href="#about">About</a><a href="#features">Features</a><a href="#help">Help</a></div></nav><section className="landing-hero"><div className="landing-copy"><p className="eyebrow">A calmer way to connect</p><h1>Conversations,<br /><em>in focus.</em></h1><p>SEARCH brings your people, ideas, and everyday moments together in one thoughtful space.</p><div className="hero-actions"><button className="primary-button" onClick={() => document.querySelector<HTMLInputElement>("[aria-label='Email address']")?.focus()}>Get started</button><button className="secondary-button" onClick={() => setRegistering(true)}>Create an account</button></div></div><div className="hero-card"><div className="hero-card-top"><span className="brand-mark">S</span><span>Private by design</span><i /></div><div className="hero-message incoming-card"><span className="mini-avatar coral">AM</span><div><strong>Ava Morgan</strong><p>The launch notes look great.</p></div><time>09:42</time></div><div className="hero-message outgoing-card"><div><strong>You</strong><p>Let&apos;s polish the final details?</p></div><time>09:43</time></div><div className="hero-card-footer"><span><i /> Everyone&apos;s here</span><span>✓✓</span></div></div></section><section className="public-section" id="about"><p className="eyebrow">Made for real conversations</p><h2>Less noise. More signal.</h2><p>SEARCH is an original communication platform designed around clarity, control, and the people you care about.</p></section><section className="public-section feature-section" id="features"><div><p className="eyebrow">Everything in one place</p><h2>Thoughtful tools for staying close.</h2></div><div className="feature-grid"><article><strong>01</strong><h3>Private spaces</h3><p>Message people directly with clear request and contact controls.</p></article><article><strong>02</strong><h3>In the moment</h3><p>Real-time delivery, reactions, replies, receipts, and presence.</p></article><article><strong>03</strong><h3>Find your focus</h3><p>Search conversations and keep important messages close.</p></article></div></section><section className="public-section" id="help"><p className="eyebrow">Need a hand?</p><h2>We&apos;re here to help.</h2><p>Start with an account, then use the in-app conversation controls to connect securely.</p></section><div className="auth-card"><div className="brand"><span className="brand-mark">S</span><span>SEARCH</span></div><h1>{registering ? "Create your account" : "Welcome back"}</h1><p className="auth-subtitle">Private conversations, in focus.</p><form onSubmit={submit}>{registering && <input required value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Display name" /> }<input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Email address" />  {false && <input required minLength={8} type="password" value={password} onChange={() => undefined} placeholder="Password (8+ characters)" />}{error && <p className="form-error">{error}</p>}<button className="primary-button" disabled={busy}>{busy ? "Please wait..." : registering ? "Create account" : "Sign in"}</button></form><button className="link-button" onClick={() => { setRegistering(!registering); setError(""); }}>{registering ? "Already have an account? Sign in" : "New to SEARCH? Create an account"}</button></div></main>;
 }
 
 function App() {
@@ -148,8 +217,8 @@ function App() {
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to update message"); }
   }
 
-  function signOut() { localStorage.removeItem("search-token"); setToken(null); setUser(null); socket?.disconnect(); }
-  if (!token || !user) return <AuthScreen onAuthenticated={(result) => { localStorage.setItem("search-token", result.token); setToken(result.token); setUser(result.user); }} />;
+  function signOut() { if (token) void request("/api/auth/logout", { method: "POST" }, token); localStorage.removeItem("search-token"); setToken(null); setUser(null); socket?.disconnect(); }
+  if (!token || !user) return <OtpAuthScreen onAuthenticated={(result) => { localStorage.setItem("search-token", result.token); setToken(result.token); setUser(result.user); }} />;
 
   return <main className={`app-shell ${active ? "has-active-chat" : ""}`}>
     <aside className="sidebar"><div className="brand"><span className="brand-mark">S</span><span>SEARCH</span></div><div className="profile-card"><div className="avatar coral">{user.displayName.slice(0, 2).toUpperCase()}</div><div><strong>{user.displayName}</strong><span>@{user.handle}</span></div><button onClick={signOut} aria-label="Sign out">↪</button></div><label className="search-box"><span>⌕</span><input aria-label="Search messages" value={searchQuery} onChange={(event) => void searchConversation(event.target.value)} placeholder="Search messages" /></label>{messageResults.length > 0 && <div className="new-conversation search-results">{messageResults.map((result) => <button key={result.id} onClick={() => { setActiveId(result.conversationId); setMessageResults([]); }}><span>{result.body || "Message deleted"}</span></button>)}</div>}<div className="online-heading"><span>Online now</span><small>{conversations.length ? `${conversations.length} active` : "Invite a contact"}</small></div><div className="online-strip">{conversations.slice(0, 5).map((conversation) => { const participant = conversation.participants.find((item) => item.id !== user.id); return <button key={conversation.id} onClick={() => setActiveId(conversation.id)} title={participant?.displayName}><span className="avatar coral">{participant?.displayName.slice(0, 2).toUpperCase() ?? "??"}</span><i /></button>; })}</div><div className="section-heading"><span>Conversations</span><button aria-label="New conversation" onClick={() => setShowNew(!showNew)}>＋</button></div>{showNew && <div className="new-conversation"><input autoFocus value={userSearch} onChange={(event) => void findUsers(event.target.value)} placeholder="Find by email or ID" />{searchResults.map((result) => <button key={result.id} onClick={() => void openConversation(result.id)}><div className="avatar blue small">{result.displayName.slice(0, 2).toUpperCase()}</div><span>{result.displayName}<small>{result.handle}</small></span></button>)}</div>}<nav className="conversation-list">{conversations.map((conversation) => { const participant = conversation.participants.find((item) => item.id !== user.id); return <button className={`conversation ${conversation.id === activeId ? "selected" : ""}`} key={conversation.id} onClick={() => setActiveId(conversation.id)}><div className="avatar coral">{participant?.displayName.slice(0, 2).toUpperCase() ?? "??"}</div><div className="conversation-copy"><div><strong>{participant?.displayName ?? conversation.title}</strong><time>{conversation.lastMessage ? new Date(conversation.lastMessage.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}</time></div><p>{conversation.lastMessage?.body ?? "Start a conversation"}</p>{conversation.unreadCount > 0 && <span className="unread">{conversation.unreadCount}</span>}</div></button>; })}</nav><div className="mobile-nav"><button onClick={() => setActiveId(undefined)}>☰<span>Chats</span></button><button onClick={() => setShowNew(true)}>＋<span>New</span></button><button>◉<span>Contacts</span></button><button>⚙<span>Settings</span></button></div><div className="sidebar-footer"><button>⚙ <span>Settings</span></button><button>?</button></div></aside>

@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import "./env.js";
 import { randomUUID } from "node:crypto";
 import type { AuthUser, Contact, ConversationDetail, Message, MessageRequest, UserSummary } from "@search/shared";
 
@@ -13,12 +14,26 @@ interface StoreData {
   conversations: ConversationDetail[];
   messages: Message[];
   sessions: Record<string, string>;
+  sessionExpiresAt: Record<string, string>;
   contacts: Array<Contact & { ownerId: string }>;
   messageRequests: MessageRequest[];
+  pendingRegistrations: PendingRegistration[];
+}
+
+export interface PendingRegistration {
+  id: string;
+  email: string;
+  displayName?: string;
+  handle?: string;
+  otpHash: string;
+  otpExpiresAt: string;
+  resendAvailableAt: string;
+  attempts: number;
+  createdAt: string;
 }
 
 const filePath = process.env.SEARCH_DATA_FILE ?? join(process.cwd(), "data", "search.json");
-const emptyData: StoreData = { users: [], conversations: [], messages: [], sessions: {}, contacts: [], messageRequests: [] };
+const emptyData: StoreData = { users: [], conversations: [], messages: [], sessions: {}, sessionExpiresAt: {}, contacts: [], messageRequests: [], pendingRegistrations: [] };
 
 let data: StoreData | undefined;
 let writeQueue = Promise.resolve();
@@ -33,6 +48,8 @@ async function load(): Promise<StoreData> {
     await mkdir(dirname(filePath), { recursive: true });
     await writeFile(filePath, JSON.stringify(data, null, 2));
   }
+  data.pendingRegistrations ??= [];
+  data.sessionExpiresAt ??= {};
   return data;
 }
 
@@ -58,16 +75,52 @@ export async function createUser(input: Omit<StoredUser, "id" | "createdAt">): P
   return user;
 }
 
+export async function findPendingRegistration(email: string): Promise<PendingRegistration | undefined> {
+  return (await load()).pendingRegistrations.find((item) => item.email === email.toLowerCase());
+}
+
+export async function savePendingRegistration(registration: PendingRegistration): Promise<void> {
+  const store = await load();
+  store.pendingRegistrations = store.pendingRegistrations.filter((item) => item.email !== registration.email);
+  store.pendingRegistrations.push(registration);
+  await persist();
+}
+
+export async function removePendingRegistration(id: string): Promise<PendingRegistration | undefined> {
+  const store = await load();
+  const index = store.pendingRegistrations.findIndex((item) => item.id === id);
+  if (index < 0) return undefined;
+  const [registration] = store.pendingRegistrations.splice(index, 1);
+  await persist();
+  return registration;
+}
+
 export async function createSession(userId: string): Promise<string> {
   const store = await load();
   const token = randomUUID() + randomUUID();
   store.sessions[token] = userId;
+  store.sessionExpiresAt[token] = new Date(Date.now() + 30 * 24 * 60 * 60_000).toISOString();
   await persist();
   return token;
 }
 
 export async function userIdForToken(token: string): Promise<string | undefined> {
-  return (await load()).sessions[token];
+  const store = await load();
+  const expiresAt = store.sessionExpiresAt[token];
+  if (expiresAt && Date.parse(expiresAt) <= Date.now()) {
+    delete store.sessions[token];
+    delete store.sessionExpiresAt[token];
+    await persist();
+    return undefined;
+  }
+  return store.sessions[token];
+}
+
+export async function deleteSession(token: string): Promise<void> {
+  const store = await load();
+  delete store.sessions[token];
+  delete store.sessionExpiresAt[token];
+  await persist();
 }
 
 export async function listConversations(userId: string): Promise<ConversationDetail[]> {

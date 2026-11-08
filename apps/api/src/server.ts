@@ -9,7 +9,9 @@ import type { CreateMessageInput, HealthResponse, Message } from "@search/shared
 import {
   createMessage,
   createSession,
+  deleteSession,
   createUser,
+  findPendingRegistration,
   findMessage,
   findOrCreateConversation,
   findUserByEmail,
@@ -28,17 +30,21 @@ import {
   updateMessage,
   updateContactName,
   updateMessageRequest,
-  userIdForToken
+  userIdForToken,
+  savePendingRegistration,
+  removePendingRegistration
 } from "./store.js";
-import type { StoredUser } from "./store.js";
-import { hashPassword, verifyPassword } from "./security.js";
-import { integrationHealth, persistenceMode, verifySupabase } from "./integrations.js";
+import type { PendingRegistration, StoredUser } from "./store.js";
+import { createOtp, hashOtp } from "./security.js";
+import { sendVerificationCode } from "./email.js";
+import { integrationHealth, persistenceMode, supabaseConfigured, verifySupabase } from "./integrations.js";
 
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: process.env.WEB_ORIGIN ?? "http://localhost:5173" } });
 const port = Number(process.env.PORT ?? 4000);
 const attempts = new Map<string, { count: number; resetAt: number }>();
+const otpLocks = new Map<string, Promise<unknown>>();
 
 app.disable("x-powered-by");
 app.use(helmet());
@@ -78,8 +84,21 @@ function limited(key: string): boolean {
     attempts.set(key, { count: 1, resetAt: now + 60_000 });
     return false;
   }
+
   current.count += 1;
   return current.count > 30;
+}
+
+async function withOtpLock<T>(email: string, operation: () => Promise<T>): Promise<T> {
+  const normalized = email.toLowerCase();
+  const previous = otpLocks.get(normalized) ?? Promise.resolve();
+  const current = previous.catch(() => undefined).then(operation);
+  otpLocks.set(normalized, current);
+  try {
+    return await current;
+  } finally {
+    if (otpLocks.get(normalized) === current) otpLocks.delete(normalized);
+  }
 }
 
 app.get("/health", async (_request, response) => {
@@ -100,52 +119,107 @@ app.get("/health/integrations", async (_request, response) => {
   const supabaseConnected = await verifySupabase();
   response.json({
     persistence: persistenceMode,
-    supabase: persistenceMode === "supabase" ? (supabaseConnected ? "connected" : "unavailable") : "not_configured",
+    supabase: !supabaseConfigured
+      ? "not_configured"
+      : supabaseConnected
+        ? "configured_but_unused"
+        : "unavailable",
     ...integrations
   });
 });
 
-app.post("/api/auth/register", async (request, response) => {
-  const { email, password, displayName } = request.body as Record<string, unknown>;
-  if (typeof email !== "string" || typeof password !== "string" || typeof displayName !== "string" ||
-      !email.includes("@") || password.length < 8 || displayName.trim().length < 2) {
-    response.status(400).json({ error: "Email, display name, and a password of at least 8 characters are required" });
+app.post("/api/auth/request-otp", async (request, response) => {
+  const { email } = request.body as Record<string, unknown>;
+  if (typeof email !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+    response.status(400).json({ error: "A valid email address is required" });
     return;
   }
-  if (limited(request.ip ?? "unknown")) {
-    response.status(429).json({ error: "Too many registration attempts" });
+  if (limited(`${request.ip ?? "unknown"}:${email.toLowerCase()}`)) {
+    response.status(429).json({ error: "Too many code requests. Please try again later." });
     return;
   }
-  if (await findUserByEmail(email)) {
-    response.status(409).json({ error: "An account with that email already exists" });
-    return;
-  }
-  const handle = `${displayName.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 18)}-${randomUUID().slice(0, 6)}`;
-  const user = await createUser({
-    email: email.toLowerCase(),
-    displayName: displayName.trim(),
-    handle,
-    about: "",
-    presence: "online",
-    passwordHash: hashPassword(password)
+  await withOtpLock(email, async () => {
+    const normalizedEmail = email.trim().toLowerCase();
+    const existing = await findPendingRegistration(normalizedEmail);
+    if (existing && Date.parse(existing.resendAvailableAt) > Date.now()) {
+      response.status(429).json({ error: "Please wait before requesting another code" });
+      return;
+    }
+    const otp = createOtp();
+    const pending: PendingRegistration = {
+      id: existing?.id ?? randomUUID(),
+      email: normalizedEmail,
+      otpHash: hashOtp(otp),
+      otpExpiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
+      resendAvailableAt: new Date(Date.now() + 30_000).toISOString(),
+      attempts: 0,
+      createdAt: existing?.createdAt ?? new Date().toISOString()
+    };
+    await savePendingRegistration(pending);
+    try {
+      await sendVerificationCode(normalizedEmail, otp);
+      response.status(202).json({ verificationRequired: true, email: normalizedEmail });
+    } catch (error) {
+      await removePendingRegistration(pending.id);
+      response.status(503).json({ error: error instanceof Error ? error.message : "Email delivery is unavailable" });
+    }
   });
-  const token = await createSession(user.id);
-  response.status(201).json({ user: toAuthUser(user), token });
+});
+
+app.post("/api/auth/verify-email", async (request, response) => {
+  const { email, otp } = request.body as Record<string, unknown>;
+  if (typeof email !== "string" || typeof otp !== "string" || !/^\d{6}$/.test(otp)) {
+    response.status(400).json({ error: "A valid email and six-digit verification code are required" });
+    return;
+  }
+  await withOtpLock(email, async () => {
+    const pending = await findPendingRegistration(email);
+    if (!pending || Date.parse(pending.otpExpiresAt) <= Date.now()) {
+      response.status(400).json({ error: "That verification code is invalid or expired" });
+      return;
+    }
+    if (pending.attempts >= 5) {
+      response.status(429).json({ error: "Too many verification attempts. Request a new code." });
+      return;
+    }
+    pending.attempts += 1;
+    if (hashOtp(otp) !== pending.otpHash) {
+      await savePendingRegistration(pending);
+      response.status(400).json({ error: "That verification code is invalid or expired" });
+      return;
+    }
+    const normalizedEmail = email.trim().toLowerCase();
+    const existing = await findUserByEmail(normalizedEmail);
+    const localName = normalizedEmail.split("@")[0].replace(/[._-]+/g, " ").trim();
+    const handleBase = normalizedEmail.split("@")[0].replace(/[^a-z0-9]/gi, "").slice(0, 18) || "user";
+    const user = existing
+      ? existing
+      : await createUser({
+          email: normalizedEmail,
+          displayName: localName || "SEARCH user",
+          handle: `${handleBase}-${randomUUID().slice(0, 6)}`,
+          about: "",
+          presence: "online",
+          passwordHash: ""
+        });
+    await removePendingRegistration(pending.id);
+    const token = await createSession(user.id);
+    response.status(201).json({ user: toAuthUser(user), token, existingAccount: Boolean(existing) });
+  });
 });
 
 app.post("/api/auth/login", async (request, response) => {
-  const { email, password } = request.body as Record<string, unknown>;
-  if (typeof email !== "string" || typeof password !== "string" || limited(request.ip ?? "unknown")) {
-    response.status(400).json({ error: "Valid email and password are required" });
-    return;
-  }
-  const user = await findUserByEmail(email);
-  if (!user || !verifyPassword(password, user.passwordHash)) {
-    response.status(401).json({ error: "Invalid email or password" });
-    return;
-  }
-  const token = await createSession(user.id);
-  response.json({ user: toAuthUser(user), token });
+  response.status(410).json({ error: "Password authentication has been removed. Use /api/auth/request-otp." });
+});
+
+app.post("/api/auth/register", async (_request, response) => {
+  response.status(410).json({ error: "Password registration has been removed. Use /api/auth/request-otp." });
+});
+
+app.post("/api/auth/logout", async (request, response) => {
+  const token = request.header("authorization")?.replace(/^Bearer\s+/i, "");
+  if (token) await deleteSession(token);
+  response.status(204).end();
 });
 
 app.get("/api/me", async (request, response) => {

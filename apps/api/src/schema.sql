@@ -49,6 +49,19 @@ create table if not exists sessions (
   created_at timestamptz not null default now()
 );
 
+create table if not exists pending_registrations (
+  id uuid primary key default gen_random_uuid(),
+  email text unique not null,
+  display_name text,
+  handle text,
+  password_hash text,
+  otp_hash text not null,
+  otp_expires_at timestamptz not null,
+  resend_available_at timestamptz not null,
+  attempts integer not null default 0,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists messages (
   id uuid primary key default gen_random_uuid(),
   conversation_id uuid references conversations(id) on delete cascade,

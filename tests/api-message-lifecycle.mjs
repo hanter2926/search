@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
@@ -7,8 +7,9 @@ import { io } from "socket.io-client";
 
 const dataDirectory = await mkdtemp(join(tmpdir(), "search-api-"));
 const dataFile = join(dataDirectory, "search.json");
+const outboxFile = join(dataDirectory, "outbox.json");
 const server = spawn(process.execPath, ["apps/api/dist/server.js"], {
-  env: { ...process.env, PORT: "4010", SEARCH_DATA_FILE: dataFile },
+  env: { ...process.env, PORT: "4010", SEARCH_DATA_FILE: dataFile, SEARCH_EMAIL_OUTBOX: outboxFile },
   stdio: "ignore"
 });
 
@@ -44,32 +45,55 @@ async function status(path, options, expectedStatus) {
 
 try {
   await waitForServer();
+  const health = await (await fetch("http://localhost:4010/health")).json();
+  assert.equal(health.persistence, "local");
+  assert.equal(health.redis, "not_configured");
+  assert.equal(health.email, "configured");
+  const integrationHealth = await (await fetch("http://localhost:4010/health/integrations")).json();
+  assert.deepEqual(integrationHealth, {
+    persistence: "local",
+    supabase: "not_configured",
+    redis: "not_configured",
+    email: "configured"
+  });
   const suffix = Date.now();
-  const first = await api("/api/auth/register", {
+  await api("/api/auth/request-otp", {
     method: "POST",
-    body: JSON.stringify({ email: `first-${suffix}@example.com`, password: "correct-horse", displayName: "First User" })
+    body: JSON.stringify({ email: `first-${suffix}@example.com` })
   });
-  const second = await api("/api/auth/register", {
+  const firstEmail = JSON.parse(await readFile(outboxFile, "utf8")).at(-1);
+  const firstOtp = firstEmail.text.match(/\b\d{6}\b/)[0];
+  const firstVerified = await api("/api/auth/verify-email", {
     method: "POST",
-    body: JSON.stringify({ email: `second-${suffix}@example.com`, password: "correct-horse", displayName: "Second User" })
+    body: JSON.stringify({ email: `first-${suffix}@example.com`, otp: firstOtp })
   });
-  const headers = { authorization: `Bearer ${first.token}` };
+  await api("/api/auth/request-otp", {
+    method: "POST",
+    body: JSON.stringify({ email: `second-${suffix}@example.com` })
+  });
+  const secondEmail = JSON.parse(await readFile(outboxFile, "utf8")).at(-1);
+  const secondOtp = secondEmail.text.match(/\b\d{6}\b/)[0];
+  const secondVerified = await api("/api/auth/verify-email", {
+    method: "POST",
+    body: JSON.stringify({ email: `second-${suffix}@example.com`, otp: secondOtp })
+  });
+  const headers = { authorization: `Bearer ${firstVerified.token}` };
   const request = await api("/api/message-requests", {
-    method: "POST", headers, body: JSON.stringify({ userId: second.user.id })
+    method: "POST", headers, body: JSON.stringify({ userId: secondVerified.user.id })
   });
   await api(`/api/message-requests/${request.id}/accept`, {
-    method: "POST", headers: { authorization: `Bearer ${second.token}` }
+    method: "POST", headers: { authorization: `Bearer ${secondVerified.token}` }
   });
   const conversation = await api("/api/conversations", {
-    method: "POST", headers, body: JSON.stringify({ userId: second.user.id })
+    method: "POST", headers, body: JSON.stringify({ userId: secondVerified.user.id })
   });
   const message = await api(`/api/conversations/${conversation.id}/messages`, {
     method: "POST", headers, body: JSON.stringify({ body: "Original text" })
   });
-  assert.deepEqual(message.readBy, [first.user.id]);
-  assert.deepEqual(message.deliveredTo, [first.user.id]);
-  const secondHeaders = { authorization: `Bearer ${second.token}` };
-  const secondSocket = io("http://localhost:4010", { auth: { token: second.token } });
+  assert.deepEqual(message.readBy, [firstVerified.user.id]);
+  assert.deepEqual(message.deliveredTo, [firstVerified.user.id]);
+  const secondHeaders = { authorization: `Bearer ${secondVerified.token}` };
+  const secondSocket = io("http://localhost:4010", { auth: { token: secondVerified.token } });
   const received = new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("Timed out waiting for real-time message")), 3000);
     secondSocket.on("message:new", (event) => {
@@ -96,7 +120,7 @@ try {
   const reacted = await api(`/api/messages/${message.id}/reactions`, {
     method: "POST", headers, body: JSON.stringify({ emoji: "❤️" })
   });
-  assert.deepEqual(reacted.reactions["❤️"], [first.user.id]);
+  assert.deepEqual(reacted.reactions["❤️"], [firstVerified.user.id]);
   const unreacted = await api(`/api/messages/${message.id}/reactions`, {
     method: "POST", headers, body: JSON.stringify({ emoji: "❤️" })
   });
@@ -104,13 +128,13 @@ try {
   const delivered = await api(`/api/messages/${message.id}/delivered`, { method: "POST", headers: secondHeaders });
   assert.equal(delivered.status, "delivered");
   const read = await api(`/api/messages/${message.id}/read`, { method: "POST", headers: secondHeaders });
-  assert.ok(read.readBy.includes(second.user.id));
+  assert.ok(read.readBy.includes(secondVerified.user.id));
   await status(`/api/conversations/${conversation.id}/read`, { method: "POST", headers: secondHeaders }, 204);
   const search = await api("/api/search/messages?q=Original", { headers: secondHeaders });
   assert.ok(search.some((item) => item.id === message.id));
   await status(`/api/messages/${message.id}`, {
     method: "PATCH",
-    headers: { authorization: `Bearer ${second.token}` },
+    headers: { authorization: `Bearer ${secondVerified.token}` },
     body: JSON.stringify({ body: "Unauthorized edit" })
   }, 403);
   const edited = await api(`/api/messages/${message.id}`, {
@@ -119,7 +143,7 @@ try {
   assert.equal(edited.body, "Edited text");
   assert.ok(edited.editedAt);
   const starred = await api(`/api/messages/${message.id}/star`, { method: "POST", headers });
-  assert.deepEqual(starred.starredBy, [first.user.id]);
+  assert.deepEqual(starred.starredBy, [firstVerified.user.id]);
   const pinned = await api(`/api/messages/${message.id}/pin`, { method: "POST", headers });
   assert.equal(pinned.pinned, true);
   const deleted = await api(`/api/messages/${message.id}`, { method: "DELETE", headers });
