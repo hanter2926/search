@@ -52,6 +52,12 @@ export interface HealthResponse {
 export interface AuthUser extends UserSummary {
   email: string;
   about: string;
+  privacy: PrivacySettings;
+}
+
+export interface PrivacySettings {
+  discoverableByEmail: boolean;
+  allowMessageRequests: boolean;
 }
 
 export interface Contact {
@@ -76,6 +82,17 @@ export interface AuthResponse {
 export interface ConversationDetail extends ConversationSummary {
   createdAt: string;
   unreadCounts?: Record<string, number>;
+  kind?: "direct" | "group";
+  admins?: string[];
+}
+
+export interface Group {
+  id: string;
+  name: string;
+  conversationId: string;
+  members: UserSummary[];
+  admins: string[];
+  createdAt: string;
 }
 
 export interface CreateMessageInput {

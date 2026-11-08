@@ -38,6 +38,8 @@ Last validated: 2026-11-08
 - Unread clearing
 - Authenticated message search
 - API authorization regression cases
+- Contact privacy controls: persisted settings, hidden email discovery, and blocked message requests
+- Group API slice: persisted group creation/listing and member message access
 
 ## Not yet run
 
@@ -46,5 +48,6 @@ Last validated: 2026-11-08
 - Physical Android device workflow
 - Real Android device tests
 - Supabase integration tests
+- Group management UI and physical Android group workflow
 - Redis integration tests
 - Media, calls, notifications, and E2EE tests

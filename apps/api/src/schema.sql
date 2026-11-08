@@ -6,6 +6,8 @@ create table if not exists profiles (
   handle text unique not null,
   display_name text not null,
   about text not null default '',
+  discoverable_by_email boolean not null default true,
+  allow_message_requests boolean not null default true,
   avatar_url text,
   presence text not null default 'offline' check (presence in ('online', 'away', 'offline')),
   password_hash text not null,
@@ -17,6 +19,20 @@ create table if not exists conversations (
   title text not null,
   unread_counts jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
+);
+
+create table if not exists groups (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  conversation_id uuid unique not null references conversations(id) on delete cascade,
+  admins uuid[] not null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists group_members (
+  group_id uuid references groups(id) on delete cascade,
+  user_id uuid references profiles(id) on delete cascade,
+  primary key (group_id, user_id)
 );
 
 create table if not exists conversation_members (

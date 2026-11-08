@@ -33,6 +33,10 @@ import {
   userIdForToken,
   savePendingRegistration,
   removePendingRegistration
+  , updateUserPrivacy,
+  createGroup,
+  listGroups,
+  addGroupMember
 } from "./store.js";
 import type { PendingRegistration, StoredUser } from "./store.js";
 import { createOtp, hashOtp } from "./security.js";
@@ -200,6 +204,7 @@ app.post("/api/auth/verify-email", async (request, response) => {
           handle: `${handleBase}-${randomUUID().slice(0, 6)}`,
           about: "",
           presence: "online",
+          privacy: { discoverableByEmail: true, allowMessageRequests: true },
           passwordHash: ""
         });
     await removePendingRegistration(pending.id);
@@ -238,9 +243,30 @@ app.get("/api/users", async (request, response) => {
   const candidates = await Promise.all([findUserByEmail(query), findUserById(query)]);
   const users: StoredUser[] = [];
   for (const user of candidates) {
-    if (user && user.id !== session.user.id) users.push(user);
+    if (user && user.id !== session.user.id && (user.id === query || user.privacy.discoverableByEmail)) users.push(user);
   }
   response.json(users.map(toSummary));
+});
+
+app.get("/api/privacy", async (request, response) => {
+  const session = await currentUser(request, response);
+  if (session) response.json(session.user.privacy);
+});
+
+app.patch("/api/privacy", async (request, response) => {
+  const session = await currentUser(request, response);
+  if (!session) return;
+  const { discoverableByEmail, allowMessageRequests } = request.body ?? {};
+  if (typeof discoverableByEmail !== "boolean" || typeof allowMessageRequests !== "boolean") {
+    response.status(400).json({ error: "Privacy settings must be boolean values" });
+    return;
+  }
+  const user = await updateUserPrivacy(session.user.id, { discoverableByEmail, allowMessageRequests });
+  if (!user) {
+    response.status(404).json({ error: "User not found" });
+    return;
+  }
+  response.json(user.privacy);
 });
 
 app.get("/api/conversations", async (request, response) => {
@@ -286,6 +312,11 @@ app.post("/api/message-requests", async (request, response) => {
     response.status(409).json({ error: "Users are already contacts" });
     return;
   }
+  const recipient = await findUserById(userId);
+  if (!recipient?.privacy.allowMessageRequests) {
+    response.status(403).json({ error: "This user is not accepting message requests" });
+    return;
+  }
   response.status(201).json(await createMessageRequest(session.user.id, userId));
 });
 
@@ -318,6 +349,42 @@ app.post("/api/conversations", async (request, response) => {
     return;
   }
   response.status(201).json(await findOrCreateConversation(session.user.id, otherUserId));
+});
+
+app.get("/api/groups", async (request, response) => {
+  const session = await currentUser(request, response);
+  if (session) response.json(await listGroups(session.user.id));
+});
+
+app.post("/api/groups", async (request, response) => {
+  const session = await currentUser(request, response);
+  if (!session) return;
+  const { name, memberIds } = request.body ?? {};
+  if (typeof name !== "string" || name.trim().length < 1 || name.trim().length > 100 || !Array.isArray(memberIds) || memberIds.some((id: unknown) => typeof id !== "string")) {
+    response.status(400).json({ error: "A group name and memberIds are required" });
+    return;
+  }
+  try {
+    response.status(201).json(await createGroup(session.user.id, name.trim(), memberIds));
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : "Unable to create group" });
+  }
+});
+
+app.post("/api/groups/:groupId/members", async (request, response) => {
+  const session = await currentUser(request, response);
+  if (!session) return;
+  const memberId = request.body?.userId;
+  if (typeof memberId !== "string") {
+    response.status(400).json({ error: "A valid userId is required" });
+    return;
+  }
+  const group = await addGroupMember(request.params.groupId, session.user.id, memberId);
+  if (!group) {
+    response.status(403).json({ error: "Only a group admin can add a new member" });
+    return;
+  }
+  response.json(group);
 });
 
 app.get("/api/conversations/:conversationId/messages", async (request, response) => {

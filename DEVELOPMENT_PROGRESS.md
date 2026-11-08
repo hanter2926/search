@@ -4,7 +4,7 @@ Last updated: 2026-11-08
 
 ## Current task
 
-IMPLEMENTED — passwordless OTP authentication, shared light SEARCH workspace theme, and expiring logout-capable sessions; next task is the Supabase repository adapter.
+IN PROGRESS — group conversations, membership permissions, and group messaging; contacts and privacy controls are tested.
 
 ## Preview URLs
 
@@ -71,9 +71,27 @@ The web preview is not visually verified until the integrated browser inspection
 - `TESTED` — The server reported `existingAccount: false`; a new account was created without modifying existing user data.
 - `IMPLEMENTED` — Gmail SMTP delivery is operationally verified for this environment.
 
+## Contacts privacy controls (2026-11-08)
+
+- `TESTED` — Added persisted per-user `discoverableByEmail` and `allowMessageRequests` settings with permissive defaults for existing users.
+- `TESTED` — Added authenticated `GET/PATCH /api/privacy` endpoints with boolean validation.
+- `TESTED` — Email discovery respects the target user's privacy setting.
+- `TESTED` — Message request creation rejects recipients who disabled requests.
+- `TESTED` — Added PostgreSQL migration `005_privacy_controls.sql` and matching baseline schema fields.
+- `TESTED` — Web authenticated shell exposes controls for email discoverability and message requests.
+- `TESTED` — API lifecycle and OTP integration tests pass with privacy isolation coverage.
+
+## Groups and group messaging (2026-11-08)
+
+- `IMPLEMENTED` — Added persisted group records and group membership data in the local store.
+- `IMPLEMENTED` — Added `POST/GET /api/groups` and admin-gated `POST /api/groups/:groupId/members`.
+- `TESTED` — Group members can use the existing conversation message endpoint; non-members remain blocked by conversation membership authorization.
+- `IMPLEMENTED` — Added baseline schema and migration `006_groups.sql`.
+- `IN PROGRESS` — Group management controls and group-specific responsive web/mobile surfaces remain.
+
 ## Current phase
 
-Passwordless OTP authentication is implemented and tested with the explicit local test outbox. Production delivery remains dependent on SMTP credentials. Existing profiles are reused by normalized email and legacy profile data is not overwritten. The refreshed theme was visually inspected at 1440px and 390px widths; authenticated workspace visual inspection remains pending a verified account session. Domain operations still use the local store. The next phase is a formal persistence interface with a Supabase implementation selected by environment.
+Passwordless OTP authentication and Gmail SMTP delivery are implemented and tested. Existing profiles are reused by normalized email and legacy profile data is not overwritten. Contacts and privacy controls are tested at the API level; authenticated workspace visual inspection remains pending a browser session. Domain operations still use the local store. The next product task is groups and group permissions.
 
 ## Persistence audit
 
@@ -110,6 +128,6 @@ npm run test:api        # passed
 
 The API integration test also asserts the no-credential integration-health response.
 
-Exact next task: define the persistence repository contract, implement the local adapter behind it, and add a credential-gated Supabase adapter test without changing the active local default.
+Exact next task: add group management controls to the web/Expo clients and expand group authorization coverage before marking groups tested.
 
 The API integration test additionally exercises pending registration, OTP extraction only from the isolated test outbox, verification, and activation.

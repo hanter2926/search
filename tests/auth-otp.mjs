@@ -51,6 +51,17 @@ try {
   assert.equal(firstAgain.response.status, 201);
   assert.equal(firstAgain.body.user.id, first.body.user.id);
   assert.equal(firstAgain.body.existingAccount, true);
+  assert.deepEqual(first.body.user.privacy, { discoverableByEmail: true, allowMessageRequests: true });
+
+  const privacyUpdate = await call("/api/privacy", {
+    method: "PATCH",
+    headers: { authorization: "Bearer " + first.body.token },
+    body: JSON.stringify({ discoverableByEmail: false, allowMessageRequests: false })
+  });
+  assert.equal(privacyUpdate.response.status, 200);
+  assert.deepEqual(privacyUpdate.body, { discoverableByEmail: false, allowMessageRequests: false });
+  const privacyRead = await call("/api/privacy", { headers: { authorization: "Bearer " + first.body.token } });
+  assert.deepEqual(privacyRead.body, privacyUpdate.body);
 
   const cooldownEmail = `cooldown-${Date.now()}@example.com`;
   await requestCode(cooldownEmail);
@@ -65,10 +76,36 @@ try {
   const second = await call("/api/auth/verify-email", { method: "POST", body: JSON.stringify({ email: secondEmail, otp: secondCode }) });
   assert.equal(second.response.status, 201);
   assert.notEqual(second.body.user.id, first.body.user.id);
+  const hiddenSearch = await call(`/api/users?q=${encodeURIComponent(firstEmail)}`, { headers: { authorization: "Bearer " + second.body.token } });
+  assert.equal(hiddenSearch.response.status, 200);
+  assert.deepEqual(hiddenSearch.body, []);
+  const blockedRequest = await call("/api/message-requests", {
+    method: "POST",
+    headers: { authorization: "Bearer " + second.body.token },
+    body: JSON.stringify({ userId: first.body.user.id })
+  });
+  assert.equal(blockedRequest.response.status, 403);
   const firstData = await call("/api/conversations", { headers: { authorization: `Bearer ${first.body.token}` } });
   const secondData = await call("/api/conversations", { headers: { authorization: `Bearer ${second.body.token}` } });
   assert.deepEqual(firstData.body, []);
   assert.deepEqual(secondData.body, []);
+
+  const groupCreate = await call("/api/groups", {
+    method: "POST",
+    headers: { authorization: "Bearer " + first.body.token },
+    body: JSON.stringify({ name: "SEARCH test group", memberIds: [second.body.user.id] })
+  });
+  assert.equal(groupCreate.response.status, 201);
+  assert.equal(groupCreate.body.members.length, 2);
+  const groupList = await call("/api/groups", { headers: { authorization: "Bearer " + second.body.token } });
+  assert.equal(groupList.response.status, 200);
+  assert.equal(groupList.body[0].conversationId, groupCreate.body.conversationId);
+  const groupMessage = await call(`/api/conversations/${groupCreate.body.conversationId}/messages`, {
+    method: "POST",
+    headers: { authorization: "Bearer " + second.body.token },
+    body: JSON.stringify({ body: "Group message" })
+  });
+  assert.equal(groupMessage.response.status, 201);
   console.log("Passwordless OTP authentication test passed");
 } finally {
   server.kill();

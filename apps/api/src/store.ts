@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import "./env.js";
 import { randomUUID } from "node:crypto";
-import type { AuthUser, Contact, ConversationDetail, Message, MessageRequest, UserSummary } from "@search/shared";
+import type { AuthUser, Contact, ConversationDetail, Group, Message, MessageRequest, PrivacySettings, UserSummary } from "@search/shared";
 
 export interface StoredUser extends AuthUser {
   passwordHash: string;
@@ -18,6 +18,7 @@ interface StoreData {
   contacts: Array<Contact & { ownerId: string }>;
   messageRequests: MessageRequest[];
   pendingRegistrations: PendingRegistration[];
+  groups: Group[];
 }
 
 export interface PendingRegistration {
@@ -33,7 +34,7 @@ export interface PendingRegistration {
 }
 
 const filePath = process.env.SEARCH_DATA_FILE ?? join(process.cwd(), "data", "search.json");
-const emptyData: StoreData = { users: [], conversations: [], messages: [], sessions: {}, sessionExpiresAt: {}, contacts: [], messageRequests: [], pendingRegistrations: [] };
+const emptyData: StoreData = { users: [], conversations: [], messages: [], sessions: {}, sessionExpiresAt: {}, contacts: [], messageRequests: [], pendingRegistrations: [], groups: [] };
 
 let data: StoreData | undefined;
 let writeQueue = Promise.resolve();
@@ -50,6 +51,11 @@ async function load(): Promise<StoreData> {
   }
   data.pendingRegistrations ??= [];
   data.sessionExpiresAt ??= {};
+  data.groups ??= [];
+  for (const user of data.users) {
+    user.privacy ??= { discoverableByEmail: true, allowMessageRequests: true };
+  }
+
   return data;
 }
 
@@ -59,8 +65,56 @@ async function persist(): Promise<void> {
   await writeQueue;
 }
 
+export async function createGroup(ownerId: string, name: string, memberIds: string[]): Promise<Group> {
+  const store = await load();
+  const ids = [...new Set([ownerId, ...memberIds])];
+  const users = await Promise.all(ids.map((id) => findUserById(id)));
+  if (users.some((user) => !user)) throw new Error("User not found");
+  const members = users.filter((user): user is StoredUser => Boolean(user)).map(toSummary);
+  const conversation: ConversationDetail = {
+    id: randomUUID(),
+    title: name,
+    participants: members,
+    unreadCount: 0,
+    createdAt: new Date().toISOString(),
+    kind: "group",
+    admins: [ownerId]
+  };
+  const group: Group = { id: randomUUID(), name, conversationId: conversation.id, members, admins: [ownerId], createdAt: conversation.createdAt };
+  store.conversations.push(conversation);
+  store.groups.push(group);
+  await persist();
+  return group;
+}
+
+export async function listGroups(userId: string): Promise<Group[]> {
+  return (await load()).groups.filter((group) => group.members.some((member) => member.id === userId));
+}
+
+export async function addGroupMember(groupId: string, actorId: string, memberId: string): Promise<Group | undefined> {
+  const store = await load();
+  const group = store.groups.find((item) => item.id === groupId);
+  if (!group || !group.admins.includes(actorId) || group.members.some((member) => member.id === memberId)) return undefined;
+  const user = await findUserById(memberId);
+  if (!user) return undefined;
+  group.members.push(toSummary(user));
+  const conversation = store.conversations.find((item) => item.id === group.conversationId);
+  if (conversation) conversation.participants = group.members;
+  await persist();
+  return group;
+}
+
 export async function findUserByEmail(email: string): Promise<StoredUser | undefined> {
   return (await load()).users.find((user) => user.email === email.toLowerCase());
+}
+
+export async function updateUserPrivacy(userId: string, privacy: PrivacySettings): Promise<StoredUser | undefined> {
+  const store = await load();
+  const user = store.users.find((item) => item.id === userId);
+  if (!user) return undefined;
+  user.privacy = privacy;
+  await persist();
+  return user;
 }
 
 export async function findUserById(id: string): Promise<StoredUser | undefined> {

@@ -20,8 +20,8 @@ Status values: `NOT STARTED`, `IN PROGRESS`, `IMPLEMENTED`, `TESTED`, `VISUALLY 
 
 ## User and communication features
 
-- [IN PROGRESS] Contacts, custom contact names, privacy controls
-- [NOT STARTED] Groups and group permissions
+- [TESTED] Contacts, custom contact names, privacy controls
+- [IN PROGRESS] Groups and group permissions
 - [NOT STARTED] Status/stories
 - [NOT STARTED] Media and document sharing
 - [IMPLEMENTED] Email OTP verification and account activation; real SMTP delivery remains externally blocked
