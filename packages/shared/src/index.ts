@@ -44,6 +44,9 @@ export interface HealthResponse {
   status: "ok";
   service: "search-api";
   timestamp: string;
+  persistence?: "local" | "supabase";
+  redis?: "connected" | "not_configured" | "unavailable";
+  email?: "configured" | "not_configured" | "unavailable";
 }
 
 export interface AuthUser extends UserSummary {

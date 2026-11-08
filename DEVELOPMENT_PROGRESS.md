@@ -2,6 +2,26 @@
 
 Last updated: 2026-11-08
 
+## Current task
+
+IN PROGRESS — continuous preview workflow and expansion of the authenticated web shell.
+
+## Preview URLs
+
+- API: `http://localhost:4000`
+- Web: `http://localhost:5173`
+
+The web preview is not visually verified until the integrated browser inspection is complete.
+
+## Latest preview verification
+
+- `VISUALLY VERIFIED` — landing, about, features, help, and login sections rendered at desktop width in the integrated browser.
+- `VISUALLY VERIFIED` — same public/auth surface rendered at a 390px mobile viewport with responsive content.
+- `TESTED` — API health at `http://localhost:4000/health`.
+- `RUNNING` — Vite at `http://localhost:5173/`.
+- `RUNNING` — API watcher at `http://localhost:4000/`.
+- `RUNNING` — Expo Metro at `http://localhost:8081/` for LAN device testing.
+
 ## Completed
 
 - TypeScript workspace with shared contracts
@@ -26,8 +46,13 @@ Last updated: 2026-11-08
 - Authenticated message search
 - Two-client Socket.IO integration coverage
 - Contact records and bidirectional accepted-contact relationships
+- Private custom contact names with owner-scoped persistence
 - Message request creation, listing, acceptance, and rejection
 - Server-enforced request gate before direct conversations
+- Public landing/about/features/help sections with working anchor navigation
+- Live development workflow with Vite, API watcher, and Expo Metro
+- Desktop online-now strip and mobile chat-list/navigation treatment based on supplied visual references
+- Clean browser reload/HMR root mounting guard
 
 ## Current phase
 

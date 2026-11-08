@@ -26,11 +26,13 @@ import {
   toAuthUser,
   toSummary,
   updateMessage,
+  updateContactName,
   updateMessageRequest,
   userIdForToken
 } from "./store.js";
 import type { StoredUser } from "./store.js";
 import { hashPassword, verifyPassword } from "./security.js";
+import { integrationHealth, persistenceMode, verifySupabase } from "./integrations.js";
 
 const app = express();
 const httpServer = createServer(app);
@@ -80,9 +82,27 @@ function limited(key: string): boolean {
   return current.count > 30;
 }
 
-app.get("/health", (_request, response) => {
-  const payload: HealthResponse = { status: "ok", service: "search-api", timestamp: new Date().toISOString() };
+app.get("/health", async (_request, response) => {
+  const integrations = await integrationHealth();
+  const payload: HealthResponse = {
+    status: "ok",
+    service: "search-api",
+    timestamp: new Date().toISOString(),
+    persistence: persistenceMode,
+    redis: integrations.redis,
+    email: integrations.email
+  };
   response.json(payload);
+});
+
+app.get("/health/integrations", async (_request, response) => {
+  const integrations = await integrationHealth();
+  const supabaseConnected = await verifySupabase();
+  response.json({
+    persistence: persistenceMode,
+    supabase: persistenceMode === "supabase" ? (supabaseConnected ? "connected" : "unavailable") : "not_configured",
+    ...integrations
+  });
 });
 
 app.post("/api/auth/register", async (request, response) => {
@@ -157,6 +177,22 @@ app.get("/api/conversations", async (request, response) => {
 app.get("/api/contacts", async (request, response) => {
   const session = await currentUser(request, response);
   if (session) response.json(await listContacts(session.user.id));
+});
+
+app.patch("/api/contacts/:contactId", async (request, response) => {
+  const session = await currentUser(request, response);
+  if (!session) return;
+  const customName = request.body?.customName;
+  if (customName !== undefined && (typeof customName !== "string" || customName.trim().length > 80)) {
+    response.status(400).json({ error: "Custom name must be at most 80 characters" });
+    return;
+  }
+  const contact = await updateContactName(session.user.id, request.params.contactId, typeof customName === "string" && customName.trim() ? customName.trim() : undefined);
+  if (!contact) {
+    response.status(404).json({ error: "Contact not found" });
+    return;
+  }
+  response.json(contact);
 });
 
 app.get("/api/message-requests", async (request, response) => {

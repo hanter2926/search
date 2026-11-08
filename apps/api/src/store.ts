@@ -140,6 +140,16 @@ export async function listContacts(userId: string): Promise<Contact[]> {
   return (await load()).contacts.filter((contact) => contact.ownerId === userId).map(({ ownerId: _ownerId, ...contact }) => contact);
 }
 
+export async function updateContactName(ownerId: string, contactId: string, customName: string | undefined): Promise<Contact | undefined> {
+  const store = await load();
+  const contact = store.contacts.find((item) => item.ownerId === ownerId && item.user.id === contactId);
+  if (!contact) return undefined;
+  contact.customName = customName;
+  await persist();
+  const { ownerId: _ownerId, ...publicContact } = contact;
+  return publicContact;
+}
+
 export async function listMessages(conversationId: string): Promise<Message[]> {
   return (await load()).messages
     .filter((message) => message.conversationId === conversationId)

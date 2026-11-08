@@ -8,6 +8,7 @@ create table if not exists profiles (
   about text not null default '',
   avatar_url text,
   presence text not null default 'offline' check (presence in ('online', 'away', 'offline')),
+  password_hash text not null,
   created_at timestamptz not null default now()
 );
 
@@ -38,6 +39,13 @@ create table if not exists message_requests (
   from_id uuid references profiles(id) on delete cascade,
   to_id uuid references profiles(id) on delete cascade,
   status text not null default 'pending' check (status in ('pending', 'accepted', 'rejected')),
+  created_at timestamptz not null default now()
+);
+
+create table if not exists sessions (
+  token_hash text primary key,
+  user_id uuid not null references profiles(id) on delete cascade,
+  expires_at timestamptz not null,
   created_at timestamptz not null default now()
 );
 
