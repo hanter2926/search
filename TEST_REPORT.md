@@ -2,6 +2,19 @@
 
 Last validated: 2026-11-08
 
+## SMTP verification
+
+- `apps/api/.env` was present and contained the required SMTP keys; its contents were not displayed.
+- Git confirmed `apps/api/.env` is ignored.
+- The API was restarted and loaded the local environment successfully.
+- `/health/integrations` reported `email: "configured"`. This is configuration detection only.
+- After network connectivity was restored, Nodemailer `verify()` succeeded using the configured Gmail STARTTLS transport.
+- `POST /api/auth/request-otp` returned HTTP `202` for the configured Gmail address.
+- The OTP was received in the real Gmail inbox and verified through `POST /api/auth/verify-email`.
+- OTP verification returned HTTP `201` with `existingAccount: false`; a new account was created for the previously unregistered normalized email.
+- No SMTP credentials, OTP, or session token were logged or returned in the test output.
+- Gmail SMTP delivery is operational for this environment. The earlier port 587 timeout was a network egress restriction, not an authentication failure.
+
 ## Passing checks
 
 - `npm run typecheck`
@@ -29,7 +42,7 @@ Last validated: 2026-11-08
 ## Not yet run
 
 - Browser end-to-end automation
-- Live SMTP delivery to Gmail or another email provider (credentials unavailable)
+- Live SMTP delivery to Gmail (SMTP credentials are configured, but outbound port 587 currently times out)
 - Physical Android device workflow
 - Real Android device tests
 - Supabase integration tests

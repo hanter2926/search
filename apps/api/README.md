@@ -33,3 +33,12 @@ The API currently provides the working local messaging vertical slice:
 Authenticated routes use `Authorization: Bearer <token>`. Socket.IO clients authenticate with `{ auth: { token } }`; the server emits `message:new` and relays `conversation:typing`.
 
 Authentication is passwordless and OTP-only. `POST /api/auth/request-otp` creates or replaces a pending five-minute code; `POST /api/auth/verify-email` signs in an existing normalized email identity or creates a new profile after successful verification. Codes are hashed, one-time, rate-limited, and never returned or logged. Configure `SMTP_URL` and `SMTP_FROM` for delivery. `SEARCH_EMAIL_OUTBOX` is an explicit local/test mail sink. Existing `password_hash` columns are retained only for backward-compatible data preservation and are not used by authentication; the old password routes return `410 Gone`. Sessions expire after 30 days and can be revoked with logout. The runtime detects Supabase, Redis, and SMTP configuration and exposes their actual status through `/health/integrations`. The relational Supabase starting schema is in [schema.sql](./src/schema.sql), with incremental DDL in [migrations/001_message_features.sql](./migrations/001_message_features.sql), [migrations/002_contacts_requests.sql](./migrations/002_contacts_requests.sql), [migrations/003_runtime_integrations.sql](./migrations/003_runtime_integrations.sql), and [migrations/004_email_verification.sql](./migrations/004_email_verification.sql).
+
+At startup the API loads `apps/api/.env` through `dotenv` when that file exists. Existing process environment variables are not overridden, so platform-provided production variables take precedence. The file is ignored by Git; copy [`.env.example`](./.env.example) and keep real credentials local. For Gmail SMTP on port 587 with STARTTLS, use:
+
+```env
+SMTP_URL=smtp://your-gmail-address%40gmail.com:your-app-password@smtp.gmail.com:587/?requireTLS=true
+SMTP_FROM=SEARCH <your-gmail-address@gmail.com>
+```
+
+Use a Google App Password rather than the normal account password, and URL-encode reserved characters in the username or password. `email: "configured"` from `/health/integrations` only confirms that configuration is present; mark Gmail operational only after an OTP is received in the real inbox and successfully verified.

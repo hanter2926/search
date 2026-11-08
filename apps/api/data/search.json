@@ -1,10 +1,25 @@
 {
-  "users": [],
+  "users": [
+    {
+      "email": "vikrampal803302@gmail.com",
+      "displayName": "vikrampal803302",
+      "handle": "vikrampal803302-2aafc0",
+      "about": "",
+      "presence": "online",
+      "passwordHash": "",
+      "id": "591fbadf-c9e5-4e05-8af2-80d0c22398a2",
+      "createdAt": "2026-11-08T14:00:07.113Z"
+    }
+  ],
   "conversations": [],
   "messages": [],
-  "sessions": {},
+  "sessions": {
+    "a27a7411-2c93-4af9-ad03-cd74f19d3f1bf7b800b8-28ca-49d6-bdf6-c1f74da4abaa": "591fbadf-c9e5-4e05-8af2-80d0c22398a2"
+  },
   "contacts": [],
   "messageRequests": [],
   "pendingRegistrations": [],
-  "sessionExpiresAt": {}
+  "sessionExpiresAt": {
+    "a27a7411-2c93-4af9-ad03-cd74f19d3f1bf7b800b8-28ca-49d6-bdf6-c1f74da4abaa": "2026-12-08T14:00:07.114Z"
+  }
 }
