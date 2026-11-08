@@ -1,0 +1,25 @@
+{
+  "name": "search",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "dev:web": "npm run dev --workspace @search/web",
+    "dev:api": "npm run dev --workspace @search/api",
+    "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\"",
+    "test:api": "npm run build --workspace @search/api && node tests/api-message-lifecycle.mjs"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "concurrently": "^9.1.2",
+    "typescript": "^5.8.3"
+  }
+}
